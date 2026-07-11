@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>退保挽单入库率分析看板</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; color: #333; padding: 20px; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 12px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; margin-bottom: 5px; }
+        .header .date { font-size: 12px; opacity: 0.8; }
+        .metric-cards { display: grid; grid-template-columns: repeat(8, 1fr); gap: 12px; margin-bottom: 20px; }
+        .metric-card { background: white; border-radius: 10px; padding: 15px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .metric-card .label { font-size: 12px; color: #718096; margin-bottom: 5px; }
+        .metric-card .value { font-size: 22px; font-weight: 700; }
+        .metric-card .sub { font-size: 11px; color: #a0aec0; }
+        .main-section { background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        .section-title { font-size: 16px; font-weight: 600; color: #2d3748; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
+        .section-title::before { content: ''; width: 4px; height: 16px; background: #667eea; border-radius: 2px; }
+        .chart-container { height: 400px; }
+        .data-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 15px; }
+        .data-table thead { position: sticky; top: 0; z-index: 10; }
+        .data-table th { background: #f7fafc; padding: 6px 4px; text-align: center; font-weight: 600; color: #4a5568; border-bottom: 2px solid #e2e8f0; }
+        .data-table td { padding: 4px; text-align: center; border-bottom: 1px solid #e2e8f0; }
+        .data-table tr:hover { background: #f7fafc; }
+        .data-table .channel-cell { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-size: 14px; font-weight: 700; padding: 8px 6px; letter-spacing: 0.5px; }
+        .data-table .pct-high { color: #d69e2e; font-weight: 600; }
+        .data-table .pct-low { color: #3182ce; font-weight: 600; }
+        .insight-box { background: #f7fafc; border-radius: 8px; padding: 15px; margin-bottom: 12px; border-left: 4px solid #667eea; }
+        .insight-box.warning { border-left-color: #ed8936; background: #fffaf0; }
+        .insight-box.danger { border-left-color: #f56565; background: #fff5f5; }
+        .insight-box.success { border-left-color: #48bb78; background: #f0fff4; }
+        .insight-box .title { font-weight: 600; font-size: 14px; color: #2d3748; margin-bottom: 8px; }
+        .insight-box .detail { font-size: 13px; color: #4a5568; line-height: 1.6; }
+        .insight-box .suggest { font-size: 12px; color: #718096; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e2e8f0; }
+        .compare-cards { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
+        .compare-card { background: #f7fafc; border-radius: 8px; padding: 15px; min-width: 140px; flex: 1; }
+        .compare-card .label { font-size: 11px; color: #718096; margin-bottom: 5px; }
+        .compare-card .value { font-size: 18px; font-weight: 600; color: #2d3748; }
+        .status-up { color: #48bb78; }
+        .status-down { color: #f56565; }
+        .select-group { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; align-items: center; }
+        .select-group label { font-size: 13px; color: #4a5568; }
+        .select-group select { padding: 6px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; background: white; }
+        .toggle-group { display: flex; gap: 15px; margin-bottom: 15px; }
+        .toggle-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #4a5568; cursor: pointer; }
+        .legend-row { display: flex; gap: 20px; margin-bottom: 15px; flex-wrap: wrap; font-size: 12px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-color { width: 12px; height: 12px; border-radius: 2px; }
+        .scroll-container { max-height: 600px; overflow: auto; }
+        .channel-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 5px; background: #edf2f7; color: #4a5568; }
+        .import-section { background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        .import-area { display: flex; align-items: center; gap: 15px; }
+        .file-input-wrapper { position: relative; }
+        .file-input-wrapper input[type="file"] { display: none; }
+        .file-input-btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: opacity 0.2s; }
+        .file-input-btn:hover { opacity: 0.9; }
+        .file-status { font-size: 13px; color: #718096; }
+        .file-status.success { color: #48bb78; }
+        .file-status.error { color: #f56565; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>退保挽单入库率分析看板</h1>
+        <div class="date">数据周期：2026年6月1日 - 7月6日（6周）</div>
+    </div>
+
+    <!-- 数据导入 -->
+    <div class="import-section">
+        <div class="section-title">数据导入</div>
+        <div class="import-area">
+            <div class="file-input-wrapper">
+                <label class="file-input-btn">
+                    📁 选择Excel文件
+                    <input type="file" id="fileInput" accept=".xlsx,.xls" onchange="handleFileUpload(event)">
+                </label>
+            </div>
+            <div class="file-status" id="fileStatus">支持同格式的Excel文件导入</div>
+        </div>
+    </div>
+
+    <div class="metric-cards" id="metricCards"></div>
+
+    <!-- 异常分析 -->
+    <div class="main-section">
+        <div class="section-title">异常分析与建议</div>
+        <div class="select-group">
+            <label>分析维度：</label>
+            <select id="anomalyMode" onchange="updateAnomaly()">
+                <option value="all">全部周期分析</option>
+                <option value="week">指定周分析</option>
+            </select>
+            <select id="anomalyWeek" onchange="updateAnomaly()" style="display:none;"></select>
+        </div>
+        <div id="anomalyContent"></div>
+    </div>
+
+    <!-- 核心指标趋势 -->
+    <div class="main-section">
+        <div class="section-title">核心指标趋势（6周）</div>
+        <div class="toggle-group">
+            <label class="toggle-item"><input type="checkbox" checked onchange="toggleTrendLine('warehouse')"> 入库率</label>
+            <label class="toggle-item"><input type="checkbox" onchange="toggleTrendLine('build')"> 建单率</label>
+            <label class="toggle-item"><input type="checkbox" onchange="toggleTrendLine('t0')"> T0拦截率</label>
+            <label class="toggle-item"><input type="checkbox" onchange="toggleTrendLine('t7')"> T7拦截率</label>
+        </div>
+        <div id="trendChart" class="chart-container"></div>
+    </div>
+
+    <!-- 入库率周环比分析 -->
+    <div class="main-section">
+        <div class="section-title">入库率周环比分析</div>
+        <div class="select-group">
+            <label>基准周：</label>
+            <select id="baseWeek" onchange="updateCompare()"></select>
+            <label>对比周：</label>
+            <select id="compareWeek" onchange="updateCompare()"></select>
+        </div>
+        <div class="compare-cards" id="compareCards"></div>
+        <div id="compareChart" class="chart-container"></div>
+    </div>
+
+    <!-- 未建单原因趋势 -->
+    <div class="main-section">
+        <div class="section-title">未建单原因趋势分析</div>
+        <div class="select-group">
+            <label>选择渠道：</label>
+            <select id="reasonChannel" onchange="updateReasonChart()"></select>
+        </div>
+        <div class="legend-row" id="reasonLegend"></div>
+        <div id="reasonChart" class="chart-container"></div>
+    </div>
+
+    <!-- 完整数据表 -->
+    <div class="main-section">
+        <div class="section-title">完整数据表</div>
+        <div class="scroll-container">
+            <div id="fullTable"></div>
+        </div>
+    </div>
+
+    <script>
+        const weeks = ['06-01', '06-08', '06-15', '06-22', '06-29', '07-06'];
+        const channels = ['直播间', '1+12', '0+12', '保', '筹', '续保', '投放均分'];
+        const colors = ['#48bb78', '#38a169', '#ed8936', '#4299e1', '#667eea', '#f56565', '#718096'];
+        const reasonColors = {
+            '保司退保': '#ed8936',
+            '微信投诉': '#f56565',
+            '用户风险': '#9f7aea',
+            '订单风险': '#667eea',
+            '客服操作': '#ecc94b'
+        };
+        const changeColor = '#4a5568';
+
+        // ========== 数据导入功能 ==========
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const statusEl = document.getElementById('fileStatus');
+            statusEl.textContent = '正在解析...';
+            statusEl.className = 'file-status';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                    const result = parseExcelData(jsonData);
+                    if (result) {
+                        // 更新全局数据
+                        weeks.length = 0;
+                        weeks.push(...result.weeks);
+                        channels.length = 0;
+                        channels.push(...result.channels);
+                        Object.keys(rawData).forEach(k => delete rawData[k]);
+                        Object.assign(rawData, result.data);
+
+                        // 更新日期显示
+                        updateDateDisplay();
+
+                        // 刷新所有模块
+                        refreshAllModules();
+
+                        statusEl.textContent = `✓ 导入成功！数据周期：${weeks[0]} - ${weeks[weeks.length-1]}（${weeks.length}周）`;
+                        statusEl.className = 'file-status success';
+                    } else {
+                        statusEl.textContent = '✗ 数据格式不正确，请检查Excel格式';
+                        statusEl.className = 'file-status error';
+                    }
+                } catch (err) {
+                    console.error(err);
+                    statusEl.textContent = '✗ 文件解析失败：' + err.message;
+                    statusEl.className = 'file-status error';
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function parseExcelData(jsonData) {
+            // 查找渠道列的位置（第3列，索引2）
+            const channelColIdx = 2;
+            const dateColIdx = 3;
+
+            // 收集所有渠道和周数据
+            const channelData = {};
+            const weekSet = new Set();
+            const channelList = [];
+
+            // 指标列映射（列索引 -> 数据key）
+            const colMapping = {
+                4: '承保量',
+                5: '工单创建量',
+                6: '建单率',
+                7: '退保订单量',
+                8: '进入退保挽单订单量',
+                9: '入库率',
+                10: '保司退保未建单占比',
+                11: '微信投诉未建单占比',
+                12: '用户高风险未建单占比',
+                13: '订单高风险未建单占比',
+                14: '客服操作未建单占比',
+                15: '退保咨询单量',
+                16: 't0拦截率',
+                17: 't7拦截率',
+                18: 't35续费率'
+            };
+
+            let currentChannel = null;
+
+            for (let i = 0; i < jsonData.length; i++) {
+                const row = jsonData[i];
+                if (!row || row.length < 4) continue;
+
+                const channelVal = String(row[channelColIdx] || '').trim();
+                const dateVal = row[dateColIdx];
+
+                // 判断是否是渠道行
+                if (['直播间', '1+12', '0+12', '保', '筹', '续保', '投放均分'].includes(channelVal)) {
+                    currentChannel = channelVal;
+                    if (!channelData[currentChannel]) {
+                        channelData[currentChannel] = {};
+                        channelList.push(currentChannel);
+                        // 初始化所有指标数组
+                        Object.values(colMapping).forEach(key => {
+                            channelData[currentChannel][key] = [];
+                        });
+                    }
+                } else if (currentChannel && dateVal) {
+                    // 解析日期
+                    const dateStr = String(dateVal);
+                    let weekKey = null;
+                    if (dateStr.includes('2026-')) {
+                        const dateMatch = dateStr.match(/(\d{4}-\d{2}-\d{2})/);
+                        if (dateMatch) {
+                            const d = dateMatch[1];
+                            weekKey = d.substring(5).replace('-', '-');
+                            weekSet.add(weekKey);
+                        }
+                    }
+
+                    // 读取各列数据
+                    Object.entries(colMapping).forEach(([colIdx, key]) => {
+                        const val = row[parseInt(colIdx)];
+                        let parsedVal = null;
+
+                        if (val === '/' || val === undefined || val === null) {
+                            parsedVal = null;
+                        } else if (typeof val === 'number') {
+                            // 检查是否是百分比（0-1之间的小数）
+                            if (key.includes('率') || key.includes('占比')) {
+                                if (val > 0 && val < 1) {
+                                    parsedVal = val * 100;
+                                } else {
+                                    parsedVal = val;
+                                }
+                            } else {
+                                parsedVal = val;
+                            }
+                        } else if (typeof val === 'string') {
+                            const numVal = parseFloat(val);
+                            if (!isNaN(numVal)) {
+                                if (key.includes('率') || key.includes('占比')) {
+                                    if (numVal > 0 && numVal < 1) {
+                                        parsedVal = numVal * 100;
+                                    } else {
+                                        parsedVal = numVal;
+                                    }
+                                } else {
+                                    parsedVal = numVal;
+                                }
+                            }
+                        }
+
+                        if (channelData[currentChannel][key]) {
+                            channelData[currentChannel][key].push(parsedVal);
+                        }
+                    });
+                }
+            }
+
+            if (channelList.length === 0) {
+                return null;
+            }
+
+            // 排序周（从旧到新）
+            const sortedWeeks = Array.from(weekSet).sort();
+
+            return {
+                weeks: sortedWeeks,
+                channels: channelList,
+                data: channelData
+            };
+        }
+
+        function updateDateDisplay() {
+            const dateEl = document.querySelector('.header .date');
+            if (weeks.length > 0) {
+                const startWeek = weeks[0];
+                const endWeek = weeks[weeks.length - 1];
+                dateEl.textContent = `数据周期：2026年${startWeek.substring(0,2)}月${startWeek.substring(3)}日 - ${endWeek.substring(0,2)}月${endWeek.substring(3)}日（${weeks.length}周）`;
+            }
+        }
+
+        function refreshAllModules() {
+            initSelects();
+            renderMetricCards();
+            updateAnomaly();
+            updateTrendChart();
+            updateCompare();
+            updateReasonChart();
+            renderFullTable();
+        }
+        // ========== 数据导入功能结束 ==========
+
+        // 完整数据（按周份顺序：06-01 → 07-06）
+        const rawData = {
+            '直播间': {
+                承保量: [null, null, null, null, null, null],
+                工单创建量: [1767, 1125, 663, 601, 535, 322],
+                建单率: [75.13, 49.04, 32.22, 27.16, null, null],
+                退保订单量: [1770, 1683, 1573, 1688, 1093, 456],
+                进入退保挽单订单量: [1059, 976, 973, 1015, 705, 263],
+                入库率: [59.83, 57.99, 61.86, 60.13, 64.50, 57.68],
+                保司退保未建单占比: [10.45, 6.95, 7.37, 7.82, 9.61, 13.82],
+                微信投诉未建单占比: [11.75, 12.42, 10.17, 9.83, 5.31, 4.82],
+                用户高风险未建单占比: [5.20, 5.94, 6.10, 7.23, 4.76, 6.36],
+                订单高风险未建单占比: [0, 0, 0, 0.06, 0, 0],
+                客服操作未建单占比: [12.77, 16.70, 14.49, 14.93, 15.83, 17.32],
+                退保咨询单量: [943, 784, 760, 950, 647, 241],
+                t0拦截率: [65.75, 65.18, 63.82, 63.68, 66.00, 79.25],
+                t7拦截率: [35.10, 34.06, 37.11, 37.58, 47.30, 65.15],
+                t35续费率: [24.39, 17.35, 12.50, 7.05, 5.41, 3.73]
+            },
+            '1+12': {
+                承保量: [47254, 48236, 53682, 55881, 58329, 31698],
+                工单创建量: [9782, 10723, 12692, 13273, 15022, 7083],
+                建单率: [20.70, 22.23, 23.64, 23.75, 25.75, 22.35],
+                退保订单量: [11638, 13016, 14513, 15411, 18843, 8764],
+                进入退保挽单订单量: [7545, 8444, 9724, 10602, 12904, 5899],
+                入库率: [64.83, 64.87, 67.00, 68.80, 68.48, 67.31],
+                保司退保未建单占比: [4.94, 10.57, 8.19, 10.89, 13.46, 14.56],
+                微信投诉未建单占比: [0.16, 0.22, 0.28, 0.32, 0.38, 0.45],
+                用户高风险未建单占比: [4.12, 4.03, 3.56, 3.23, 2.89, 3.69],
+                订单高风险未建单占比: [14.22, 7.96, 5.77, 6.75, 6.75, 5.84],
+                客服操作未建单占比: [11.73, 12.35, 13.33, 10.99, 8.03, 8.16],
+                退保咨询单量: [3970, 4633, 5347, 5693, 6659, 2930],
+                t0拦截率: [52.19, 55.10, 53.34, 56.09, 56.66, 58.53],
+                t7拦截率: [36.68, 38.31, 36.58, 37.78, 39.27, 50.20],
+                t35续费率: [19.95, 10.64, 4.39, 2.62, 1.08, 0.55]
+            },
+            '0+12': {
+                承保量: [12642, 16790, 22423, 25420, 21724, 11668],
+                工单创建量: [5400, 6864, 8945, 11088, 10656, 6226],
+                建单率: [42.71, 40.88, 39.89, 43.62, 49.05, 53.36],
+                退保订单量: [5638, 7516, 9595, 11928, 12085, 6992],
+                进入退保挽单订单量: [3835, 5189, 6600, 8610, 8796, 4963],
+                入库率: [68.02, 69.04, 68.79, 72.18, 72.78, 70.98],
+                保司退保未建单占比: [9.81, 7.50, 7.63, 7.42, 7.78, 9.04],
+                微信投诉未建单占比: [0.67, 0.82, 0.67, 0.54, 0.75, 0.56],
+                用户高风险未建单占比: [6.51, 5.69, 4.97, 3.63, 4.29, 3.85],
+                订单高风险未建单占比: [2.34, 2.12, 2.56, 2.23, 1.77, 1.87],
+                客服操作未建单占比: [12.65, 14.82, 15.38, 14.00, 12.62, 13.70],
+                退保咨询单量: [2092, 2970, 3669, 4506, 4572, 2600],
+                t0拦截率: [60.90, 59.60, 59.47, 60.21, 63.52, 62.42],
+                t7拦截率: [43.64, 43.91, 43.39, 43.45, 48.62, 55.50],
+                t35续费率: [25.76, 12.36, 4.20, 2.35, 1.49, 0.92]
+            },
+            '保': {
+                承保量: [12790, 12997, 12901, 12961, 13382, 9340],
+                工单创建量: [5506, 6010, 5733, 6339, 5443, 3454],
+                建单率: [43.05, 46.24, 44.44, 48.91, 40.67, 36.98],
+                退保订单量: [8482, 8804, 7867, 8403, 8381, 5540],
+                进入退保挽单订单量: [3630, 4305, 3981, 4448, 4441, 3102],
+                入库率: [42.80, 48.90, 50.60, 52.93, 52.99, 55.99],
+                保司退保未建单占比: [9.13, 7.68, 5.91, 3.21, 3.08, 3.16],
+                微信投诉未建单占比: [16.25, 17.65, 18.39, 18.36, 18.39, 13.57],
+                用户高风险未建单占比: [6.38, 7.12, 6.04, 5.83, 6.75, 6.71],
+                订单高风险未建单占比: [10.10, 0.35, 0.34, 0.32, 0.78, 1.37],
+                客服操作未建单占比: [15.35, 18.30, 18.71, 19.34, 18.02, 19.19],
+                退保咨询单量: [3552, 3885, 3578, 4217, 3626, 2053],
+                t0拦截率: [69.96, 72.97, 73.39, 75.12, 73.63, 72.87],
+                t7拦截率: [45.64, 48.19, 52.01, 49.30, 51.85, 60.84],
+                t35续费率: [28.69, 22.21, 14.39, 10.91, 6.98, 2.44]
+            },
+            '筹': {
+                承保量: [13033, 11992, 9807, 11455, 9376, 4979],
+                工单创建量: [5534, 6215, 5474, 5921, 5016, 2997],
+                建单率: [42.46, 51.83, 55.82, 51.69, 53.50, 60.19],
+                退保订单量: [6529, 6262, 5053, 5651, 4814, 2656],
+                进入退保挽单订单量: [2741, 3130, 2547, 2955, 2537, 1441],
+                入库率: [41.98, 49.98, 50.41, 52.29, 52.70, 54.25],
+                保司退保未建单占比: [1.84, 2.20, 2.14, 1.68, 2.01, 2.52],
+                微信投诉未建单占比: [21.29, 23.04, 24.20, 22.01, 21.69, 18.30],
+                用户高风险未建单占比: [4.52, 5.81, 5.19, 5.47, 5.77, 5.01],
+                订单高风险未建单占比: [17.35, 0.43, 0.81, 0.97, 0.64, 0.49],
+                客服操作未建单占比: [13.02, 18.52, 17.26, 17.57, 17.18, 19.43],
+                退保咨询单量: [3707, 4252, 3660, 4154, 3452, 1882],
+                t0拦截率: [74.62, 77.26, 78.01, 77.52, 79.03, 77.05],
+                t7拦截率: [53.03, 55.86, 59.95, 54.74, 61.27, 67.22],
+                t35续费率: [30.13, 22.77, 15.93, 9.92, 7.62, 3.24]
+            },
+            '续保': {
+                承保量: [39752, 37310, 38745, 35746, 38778, 21725],
+                工单创建量: [4171, 4687, 4469, 5831, 3620],
+                建单率: [10.49, 12.56, 11.53, 15.24, 15.04, 16.66],
+                退保订单量: [7800, 7133, 5931, 6188, 6732, 4195],
+                进入退保挽单订单量: [2375, 2521, 2209, 2553, 2695, 1809],
+                入库率: [30.45, 35.34, 37.24, 41.26, 40.03, 43.12],
+                保司退保未建单占比: [32.95, 22.94, 18.06, 11.38, 10.74, 11.20],
+                微信投诉未建单占比: [11.92, 13.37, 14.47, 12.77, 13.53, 10.13],
+                用户高风险未建单占比: [6.86, 8.87, 10.57, 10.33, 11.08, 9.82],
+                订单高风险未建单占比: [6.97, 0.74, 0.57, 0.87, 0.68, 0.48],
+                客服操作未建单占比: [10.85, 18.73, 19.09, 23.40, 23.93, 25.24],
+                退保咨询单量: [3109, 3598, 3264, 4265, 4517, 2326],
+                t0拦截率: [78.10, 83.44, 82.02, 81.03, 84.84, 80.74],
+                t7拦截率: [63.91, 67.82, 68.14, 65.98, 70.40, 71.93],
+                t35续费率: [41.81, 35.30, 23.90, 16.27, 10.49, 3.53]
+            },
+            '投放均分': {
+                承保量: [null, null, null, null, null, null],
+                工单创建量: [638, 738, 697, 797, 744, 431],
+                建单率: [null, null, null, null, null, null],
+                退保订单量: [1233, 1312, 1479, 1491, 1548, 925],
+                进入退保挽单订单量: [561, 565, 656, 669, 693, 405],
+                入库率: [45.50, 43.06, 44.35, 44.87, 44.77, 43.78],
+                保司退保未建单占比: [5.76, 5.56, 5.27, 4.43, 2.97, 3.46],
+                微信投诉未建单占比: [14.52, 18.06, 16.23, 18.86, 16.99, 14.05],
+                用户高风险未建单占比: [5.03, 6.86, 6.09, 6.09, 5.10, 5.03],
+                订单高风险未建单占比: [10.79, 8.08, 10.26, 9.80, 13.31, 10.79],
+                客服操作未建单占比: [18.41, 18.37, 19.11, 15.62, 18.37, 16.86],
+                退保咨询单量: [377, 326, 381, 279, 363, 211],
+                t0拦截率: [74.01, 73.93, 77.78, 69.55, 73.00, 73.93],
+                t7拦截率: [50.40, 46.32, 59.86, 44.09, 50.41, 62.09],
+                t35续费率: [30.24, 17.79, 8.92, 12.19, 3.03, 0.47]
+            }
+        };
+
+        let showWarehouse = true, showBuild = false, showT0 = false, showT7 = false;
+        let trendChart, compareChart, reasonChart;
+
+        function init() {
+            initSelects();
+            renderMetricCards();
+            initTrendChart();
+            initCompareChart();
+            initReasonChart();
+            renderFullTable();
+            updateAnomaly();
+        }
+
+        function initSelects() {
+            // 初始化下拉框（支持动态周数）
+            const weekOptions = weeks.map((w, i) => `<option value="${i}">${w}</option>`).join('');
+            document.getElementById('anomalyWeek').innerHTML = weekOptions;
+            document.getElementById('baseWeek').innerHTML = weekOptions;
+
+            // 对比周默认选择最后两周
+            const lastIdx = weeks.length - 1;
+            const prevIdx = weeks.length - 2;
+            const compareOptions = weeks.map((w, i) => {
+                let selected = '';
+                if (i === prevIdx) selected = ' selected';
+                return `<option value="${i}"${selected}>${w}</option>`;
+            }).join('');
+            document.getElementById('compareWeek').innerHTML = compareOptions;
+
+            const channelOptions = channels.map(ch => `<option value="${ch}">${ch}</option>`).join('');
+            document.getElementById('reasonChannel').innerHTML = channelOptions;
+        }
+
+        function renderMetricCards() {
+            const container = document.getElementById('metricCards');
+            // 使用最新一周的数据
+            const latestIdx = weeks.length - 1;
+            const latestWeek = weeks[latestIdx];
+            const latestRates = channels.map(ch => rawData[ch].入库率[latestIdx]);
+            const maxRate = Math.max(...latestRates);
+            const minRate = Math.min(...latestRates);
+            const avgRate = (latestRates.reduce((a, b) => a + b, 0) / latestRates.length).toFixed(1);
+
+            const maxCh = channels.find(ch => rawData[ch].入库率[latestIdx] === maxRate);
+            const minCh = channels.find(ch => rawData[ch].入库率[latestIdx] === minRate);
+
+            const metrics = [
+                { label: `最高入库率(${latestWeek})`, value: maxRate.toFixed(1) + '%', sub: maxCh, color: '#48bb78' },
+                { label: `最低入库率(${latestWeek})`, value: minRate.toFixed(1) + '%', sub: minCh, color: '#f56565' },
+                { label: `平均入库率(${latestWeek})`, value: avgRate + '%', sub: `${channels.length}渠道平均`, color: '#ed8936' }
+            ];
+
+            // 添加0+12和续保的数据（如果存在）
+            if (rawData['0+12'] && rawData['0+12'].入库率[latestIdx] !== null) {
+                metrics.push({ label: '0+12入库率', value: rawData['0+12'].入库率[latestIdx].toFixed(1) + '%', sub: '最高', color: '#48bb78' });
+            }
+            if (rawData['续保'] && rawData['续保'].入库率[latestIdx] !== null) {
+                metrics.push({ label: '续保入库率', value: rawData['续保'].入库率[latestIdx].toFixed(1) + '%', sub: '最低', color: '#f56565' });
+            }
+            if (rawData['续保'] && rawData['续保'].建单率[latestIdx] !== null) {
+                metrics.push({ label: '续保建单率', value: rawData['续保'].建单率[latestIdx].toFixed(1) + '%', sub: '偏低', color: '#ed8936' });
+            }
+            if (rawData['续保'] && rawData['续保'].客服操作未建单占比[latestIdx] !== null) {
+                metrics.push({ label: '续保客服操作', value: rawData['续保'].客服操作未建单占比[latestIdx].toFixed(1) + '%', sub: '最高', color: '#f56565' });
+            }
+            if (rawData['保'] && rawData['保'].微信投诉未建单占比[latestIdx] !== null) {
+                metrics.push({ label: '保微信投诉', value: rawData['保'].微信投诉未建单占比[latestIdx].toFixed(1) + '%', sub: '最高', color: '#f56565' });
+            }
+
+            container.innerHTML = metrics.map(m => `
+                <div class="metric-card">
+                    <div class="label">${m.label}</div>
+                    <div class="value" style="color:${m.color}">${m.value}</div>
+                    <div class="sub">${m.sub}</div>
+                </div>
+            `).join('');
+        }
+
+        // 异常分析
+        function updateAnomaly() {
+            const mode = document.getElementById('anomalyMode').value;
+            const weekSelect = document.getElementById('anomalyWeek');
+            weekSelect.style.display = mode === 'week' ? 'inline-block' : 'none';
+
+            const container = document.getElementById('anomalyContent');
+            let html = '';
+            const insights = [];
+
+            // 评估标准
+            const thresholds = {
+                入库率: { high: 65, low: 50 },
+                t0拦截率: { high: 75, low: 60 },
+                t7拦截率: { high: 55, low: 40 },
+                建单率: { high: 30, low: 15 }
+            };
+
+            if (mode === 'all') {
+                const weekCount = weeks.length;
+                channels.forEach(ch => {
+                    const d = rawData[ch];
+                    const avgWarehouse = d.入库率.reduce((a, b) => a + b, 0) / d.入库率.length;
+                    const avgT0 = d.t0拦截率.reduce((a, b) => a + b, 0) / d.t0拦截率.length;
+                    const avgT7 = d.t7拦截率.reduce((a, b) => a + b, 0) / d.t7拦截率.length;
+                    const validBuild = d.建单率.filter(v => v !== null);
+                    const avgBuild = validBuild.length > 0 ? validBuild.reduce((a, b) => a + b, 0) / validBuild.length : null;
+
+                    const firstWarehouse = d.入库率[0];
+                    const lastWarehouse = d.入库率[weekCount - 1];
+                    const warehouseTrend = lastWarehouse - firstWarehouse;
+
+                    let issues = [];
+                    let suggestions = [];
+                    let trends = [];
+
+                    if (avgWarehouse < thresholds.入库率.low) {
+                        issues.push(`平均入库率极低(${avgWarehouse.toFixed(1)}%)`);
+                        suggestions.push('优先优化入库流程，提高挽单成功率');
+                    } else if (avgWarehouse < thresholds.入库率.high) {
+                        issues.push(`平均入库率偏低(${avgWarehouse.toFixed(1)}%)`);
+                    }
+
+                    if (warehouseTrend > 5) {
+                        trends.push(`入库率上升${warehouseTrend.toFixed(1)}个百分点`);
+                    } else if (warehouseTrend < -5) {
+                        trends.push(`入库率下降${Math.abs(warehouseTrend).toFixed(1)}个百分点`);
+                        suggestions.push('入库率持续下降，需深入分析原因');
+                    }
+
+                    if (avgT0 < thresholds.t0拦截率.low) {
+                        issues.push(`T0拦截率偏低(${avgT0.toFixed(1)}%)`);
+                        suggestions.push('优化T0挽单话术，提高首次触达效果');
+                    }
+                    if (avgT7 < thresholds.t7拦截率.low) {
+                        issues.push(`T7拦截率偏低(${avgT7.toFixed(1)}%)`);
+                        suggestions.push('加强周内跟进，提升T7转化');
+                    }
+
+                    if (avgBuild && avgBuild > thresholds.建单率.high) {
+                        issues.push(`平均建单率偏高(${avgBuild.toFixed(1)}%)`);
+                        suggestions.push('用户主动退保意愿强，需分析渠道质量');
+                    }
+
+                    // 找主要损耗点（平均值）
+                    const losses = [
+                        { name: '保司退保未建单', value: d.保司退保未建单占比.reduce((a, b) => a + b, 0) / d.保司退保未建单占比.length },
+                        { name: '微信投诉未建单', value: d.微信投诉未建单占比.reduce((a, b) => a + b, 0) / d.微信投诉未建单占比.length },
+                        { name: '用户高风险未建单', value: d.用户高风险未建单占比.reduce((a, b) => a + b, 0) / d.用户高风险未建单占比.length },
+                        { name: '客服操作未建单', value: d.客服操作未建单占比.reduce((a, b) => a + b, 0) / d.客服操作未建单占比.length }
+                    ];
+                    if (d['订单高风险未建单占比']) {
+                        losses.push({ name: '订单风险未建单', value: d.订单高风险未建单占比.reduce((a, b) => a + b, 0) / d.订单高风险未建单占比.length });
+                    }
+                    losses.sort((a, b) => b.value - a.value);
+                    const mainLoss = losses[0];
+
+                    let boxClass = 'success';
+                    if (avgWarehouse < thresholds.入库率.low) boxClass = 'danger';
+                    else if (avgWarehouse < thresholds.入库率.high || issues.length > 0) boxClass = 'warning';
+
+                    insights.push({
+                        class: boxClass,
+                        channel: ch,
+                        avgWarehouse: avgWarehouse.toFixed(1),
+                        issues: issues.length > 0 ? issues.join('，') : '整体表现良好',
+                        mainLoss: `${mainLoss.name}(${mainLoss.value.toFixed(1)}%)`,
+                        suggest: suggestions.length > 0 ? suggestions.join('；') : '保持当前表现',
+                        trend: trends.length > 0 ? `，${trends.join('，')}` : ''
+                    });
+                });
+            } else {
+                // 指定周分析
+                const weekIdx = parseInt(weekSelect.value);
+
+                channels.forEach(ch => {
+                    const d = rawData[ch];
+                    const warehouseRate = d.入库率[weekIdx];
+                    const t0Rate = d.t0拦截率[weekIdx];
+                    const t7Rate = d.t7拦截率[weekIdx];
+                    const buildRate = d.建单率[weekIdx];
+
+                    let issues = [];
+                    let suggestions = [];
+
+                    if (warehouseRate < thresholds.入库率.low) {
+                        issues.push(`入库率极低(${warehouseRate.toFixed(1)}%)`);
+                        suggestions.push('优先优化入库流程，提高挽单成功率');
+                    } else if (warehouseRate < thresholds.入库率.high) {
+                        issues.push(`入库率偏低(${warehouseRate.toFixed(1)}%)`);
+                    }
+
+                    if (t0Rate < thresholds.t0拦截率.low) {
+                        issues.push(`T0拦截率偏低(${t0Rate.toFixed(1)}%)`);
+                        suggestions.push('优化T0挽单话术，提高首次触达效果');
+                    }
+                    if (t7Rate < thresholds.t7拦截率.low) {
+                        issues.push(`T7拦截率偏低(${t7Rate.toFixed(1)}%)`);
+                        suggestions.push('加强周内跟进，提升T7转化');
+                    }
+
+                    if (buildRate !== null && buildRate > thresholds.建单率.high) {
+                        issues.push(`建单率偏高(${buildRate.toFixed(1)}%)`);
+                        suggestions.push('用户主动退保意愿强，需分析渠道质量');
+                    }
+
+                    const losses = [
+                        { name: '保司退保未建单', value: d.保司退保未建单占比[weekIdx] },
+                        { name: '微信投诉未建单', value: d.微信投诉未建单占比[weekIdx] },
+                        { name: '用户高风险未建单', value: d.用户高风险未建单占比[weekIdx] },
+                        { name: '订单风险未建单', value: d.订单高风险未建单占比[weekIdx] },
+                        { name: '客服操作未建单', value: d.客服操作未建单占比[weekIdx] }
+                    ];
+                    losses.sort((a, b) => b.value - a.value);
+                    const mainLoss = losses[0];
+
+                    let boxClass = 'success';
+                    if (warehouseRate < thresholds.入库率.low) boxClass = 'danger';
+                    else if (warehouseRate < thresholds.入库率.high || issues.length > 0) boxClass = 'warning';
+
+                    insights.push({
+                        class: boxClass,
+                        channel: ch,
+                        avgWarehouse: warehouseRate.toFixed(1),
+                        issues: issues.length > 0 ? issues.join('，') : '表现良好',
+                        mainLoss: `${mainLoss.name}(${mainLoss.value.toFixed(1)}%)`,
+                        suggest: suggestions.length > 0 ? suggestions.join('；') : '保持当前表现',
+                        trend: ''
+                    });
+                });
+            }
+
+            insights.sort((a, b) => {
+                const order = { danger: 0, warning: 1, success: 2 };
+                return order[a.class] - order[b.class];
+            });
+
+            if (insights.length === 0) {
+                container.innerHTML = '<div class="insight-box success"><div class="title">✓ 整体表现良好</div><div class="detail">各渠道指标均在正常范围内</div></div>';
+            } else {
+                container.innerHTML = insights.map(item => `
+                    <div class="insight-box ${item.class}">
+                        <div class="title">${item.channel}：平均入库率${item.avgWarehouse}%${item.trend} <span class="channel-tag">主要未建单原因：${item.mainLoss}</span></div>
+                        ${item.issues !== '表现良好' ? `<div class="detail">⚠️ ${item.issues}</div>` : ''}
+                        <div class="suggest">💡 ${item.suggest}</div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // 核心指标趋势
+        function initTrendChart() {
+            trendChart = echarts.init(document.getElementById('trendChart'));
+            updateTrendChart();
+        }
+
+        function toggleTrendLine(type) {
+            if (type === 'warehouse') showWarehouse = !showWarehouse;
+            if (type === 'build') showBuild = !showBuild;
+            if (type === 't0') showT0 = !showT0;
+            if (type === 't7') showT7 = !showT7;
+            updateTrendChart();
+        }
+
+        function updateTrendChart() {
+            const series = [];
+
+            const getChange = (dataArr, idx) => {
+                if (idx === 0) return null;
+                const prev = dataArr[idx - 1];
+                const curr = dataArr[idx];
+                if (prev === null || curr === null) return null;
+                return curr - prev;
+            };
+
+            const getLabel = (channel, dataKey, dataIndex) => {
+                const data = rawData[channel][dataKey];
+                const baseVal = data[dataIndex];
+                if (baseVal === null) return '';
+
+                const change = getChange(data, dataIndex);
+                if (change === null) return baseVal.toFixed(1);
+
+                const changeStr = change >= 0 ? `+${change.toFixed(1)}` : change.toFixed(1);
+                return `${baseVal.toFixed(1)}% (${changeStr})`;
+            };
+
+            if (showWarehouse) {
+                channels.forEach((ch, i) => {
+                    series.push({
+                        name: ch,
+                        type: 'line',
+                        data: rawData[ch].入库率,
+                        smooth: true,
+                        symbolSize: 6,
+                        itemStyle: { color: colors[i] },
+                        label: { show: true, position: 'top', formatter: (params) => getLabel(ch, '入库率', params.dataIndex), fontSize: 10, color: changeColor }
+                    });
+                });
+            }
+            if (showBuild) {
+                channels.forEach((ch, i) => {
+                    const buildData = rawData[ch].建单率.map(v => v === null ? null : v);
+                    series.push({
+                        name: ch + '-建单率',
+                        type: 'line',
+                        data: buildData,
+                        smooth: true,
+                        lineStyle: { type: 'dashed', width: 2 },
+                        symbolSize: 4,
+                        itemStyle: { color: colors[i] },
+                        label: { show: true, position: 'bottom', formatter: (params) => {
+                            const data = rawData[ch].建单率;
+                            const baseVal = data[params.dataIndex];
+                            if (baseVal === null) return '';
+                            const change = getChange(data, params.dataIndex);
+                            if (change === null) return baseVal.toFixed(1);
+                            const changeStr = change >= 0 ? `+${change.toFixed(1)}` : change.toFixed(1);
+                            return `${baseVal.toFixed(1)}% (${changeStr})`;
+                        }, fontSize: 10, color: changeColor }
+                    });
+                });
+            }
+            if (showT0) {
+                channels.forEach((ch, i) => {
+                    series.push({
+                        name: ch + '-T0',
+                        type: 'line',
+                        data: rawData[ch].t0拦截率,
+                        smooth: true,
+                        symbolSize: 4,
+                        lineStyle: { type: 'dashed', width: 2 },
+                        itemStyle: { color: colors[i] },
+                        label: { show: true, position: 'top', formatter: (params) => getLabel(ch, 't0拦截率', params.dataIndex), fontSize: 9, color: changeColor }
+                    });
+                });
+            }
+            if (showT7) {
+                channels.forEach((ch, i) => {
+                    series.push({
+                        name: ch + '-T7',
+                        type: 'line',
+                        data: rawData[ch].t7拦截率,
+                        smooth: true,
+                        symbolSize: 4,
+                        lineStyle: { type: 'dotted', width: 2 },
+                        itemStyle: { color: colors[i] },
+                        label: { show: true, position: 'bottom', formatter: (params) => getLabel(ch, 't7拦截率', params.dataIndex), fontSize: 9, color: changeColor }
+                    });
+                });
+            }
+
+            trendChart.setOption({
+                tooltip: { trigger: 'axis' },
+                legend: { bottom: 0, textStyle: { fontSize: 11 }, selectedMode: 'single' },
+                grid: { left: '3%', right: '12%', bottom: '10%', top: '10%', containLabel: true },
+                xAxis: { type: 'category', data: weeks },
+                yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
+                series: series
+            });
+        }
+
+        // 入库率周环比分析
+        function initCompareChart() {
+            compareChart = echarts.init(document.getElementById('compareChart'));
+            updateCompare();
+        }
+
+        function updateCompare() {
+            const baseWeekIdx = parseInt(document.getElementById('baseWeek').value);
+            const compareWeekIdx = parseInt(document.getElementById('compareWeek').value);
+            const baseWeekName = weeks[baseWeekIdx];
+            const compareWeekName = weeks[compareWeekIdx];
+
+            const changes = channels.map(ch => {
+                const baseVal = rawData[ch].入库率[baseWeekIdx];
+                const compareVal = rawData[ch].入库率[compareWeekIdx];
+                if (baseVal !== null && compareVal !== null) {
+                    const changePct = ((compareVal - baseVal) / baseVal * 100).toFixed(1);
+                    const changeAbs = (compareVal - baseVal).toFixed(1);
+                    return { pct: changePct, abs: changeAbs, base: baseVal.toFixed(1), compare: compareVal.toFixed(1) };
+                }
+                return null;
+            });
+
+            compareChart.setOption({
+                tooltip: { trigger: 'axis', formatter: function(params) {
+                    const ch = params[0].name;
+                    const data = changes[channels.indexOf(ch)];
+                    if (!data) return ch;
+                    const sign = parseFloat(data.abs) >= 0 ? '+' : '';
+                    return `${ch}<br/>${baseWeekName}: ${data.base}%<br/>${compareWeekName}: ${data.compare}%<br/>变化: ${sign}${data.abs}pp (${sign}${data.pct}%)`;
+                }},
+                grid: { left: '3%', right: '4%', bottom: '10%', top: '10%', containLabel: true },
+                xAxis: { type: 'category', data: channels },
+                yAxis: { type: 'value', axisLabel: { formatter: "{value}%" } },
+                series: [{
+                    type: 'bar',
+                    data: changes.map(c => c ? parseFloat(c.pct) : null),
+                    label: { show: true, position: 'top', formatter: (params) => {
+                        const data = changes[params.dataIndex];
+                        if (!data) return '';
+                        const sign = parseFloat(data.abs) >= 0 ? '+' : '';
+                        return `${sign}${data.abs}pp`;
+                    }, fontSize: 10 },
+                    itemStyle: { color: function(params) {
+                        const data = changes[params.dataIndex];
+                        if (!data) return '#a0aec0';
+                        return parseFloat(data.abs) >= 0 ? '#48bb78' : '#f56565';
+                    }}
+                }]
+            });
+
+            const upCount = changes.filter(c => c && parseFloat(c.abs) > 3).length;
+            const downCount = changes.filter(c => c && parseFloat(c.abs) < -3).length;
+            const stableCount = changes.filter(c => c && Math.abs(parseFloat(c.abs)) <= 3).length;
+
+            document.getElementById('compareCards').innerHTML = `
+                <div class="compare-card">
+                    <div class="label">基准周</div>
+                    <div class="value">${baseWeekName}</div>
+                </div>
+                <div class="compare-card">
+                    <div class="label">对比周</div>
+                    <div class="value">${compareWeekName}</div>
+                </div>
+                <div class="compare-card">
+                    <div class="label">显著上升</div>
+                    <div class="value status-up">>3pp ${upCount}个</div>
+                </div>
+                <div class="compare-card">
+                    <div class="label">显著下降</div>
+                    <div class="value status-down">3pp ${downCount}个</div>
+                </div>
+                <div class="compare-card">
+                    <div class="label">基本稳定</div>
+                    <div class="value">±3pp ${stableCount}个</div>
+                </div>
+            `;
+        }
+
+        // 未建单原因趋势
+        function initReasonChart() {
+            reasonChart = echarts.init(document.getElementById('reasonChart'));
+            const legendHtml = Object.entries(reasonColors).map(([name, color]) => `
+                <div class="legend-item">
+                    <div class="legend-color" style="background:${color}"></div>
+                    <span>${name}</span>
+                </div>
+            `).join('');
+            document.getElementById('reasonLegend').innerHTML = legendHtml;
+            updateReasonChart();
+        }
+
+        function updateReasonChart() {
+            const channel = document.getElementById('reasonChannel').value;
+            const d = rawData[channel];
+            const lastIdx = weeks.length - 1;
+
+            const getChangeLabel = (dataArr, idx) => {
+                if (idx === 0) return '';
+                const prev = dataArr[idx - 1];
+                const curr = dataArr[idx];
+                const change = curr - prev;
+                return change >= 0 ? `+${change.toFixed(1)}` : change.toFixed(1);
+            };
+
+            reasonChart.setOption({
+                tooltip: { trigger: 'axis' },
+                legend: { bottom: 0, textStyle: { fontSize: 11 }, data: Object.keys(reasonColors) },
+                grid: { left: '3%', right: '12%', bottom: '15%', top: '10%', containLabel: true },
+                xAxis: { type: 'category', data: weeks },
+                yAxis: { type: 'value', max: 35, axisLabel: { formatter: '{value}%' } },
+                series: [
+                    { name: '保司退保未建单', type: 'line', data: d.保司退保未建单占比, smooth: true, symbolSize: 6, itemStyle: { color: reasonColors['保司退保'] },
+                      label: { show: true, position: 'top', formatter: () => getChangeLabel(d.保司退保未建单占比, lastIdx), fontSize: 9, color: changeColor }
+                    },
+                    { name: '微信投诉未建单', type: 'line', data: d.微信投诉未建单占比, smooth: true, symbolSize: 6, itemStyle: { color: reasonColors['微信投诉'] },
+                      label: { show: true, position: 'top', formatter: (params) => params.data > 1 ? getChangeLabel(d.微信投诉未建单占比, params.dataIndex) : '', fontSize: 9, color: changeColor }
+                    },
+                    { name: '用户高风险未建单', type: 'line', data: d.用户高风险未建单占比, smooth: true, symbolSize: 6, itemStyle: { color: reasonColors['用户风险'] },
+                      label: { show: false }
+                    },
+                    { name: '订单风险未建单', type: 'line', data: d.订单高风险未建单占比, smooth: true, symbolSize: 6, itemStyle: { color: reasonColors['订单风险'] },
+                      label: { show: false }
+                    },
+                    { name: '客服操作未建单', type: 'line', data: d.客服操作未建单占比, smooth: true, symbolSize: 6, itemStyle: { color: reasonColors['客服操作'] },
+                      label: { show: true, position: 'top', formatter: () => getChangeLabel(d.客服操作未建单占比, lastIdx), fontSize: 9, color: changeColor }
+                    }
+                ]
+            });
+        }
+
+        // 完整数据表
+        function renderFullTable() {
+            const container = document.getElementById('fullTable');
+
+            // 指标列表（按Excel顺序），带阈值设置
+            const metrics = [
+                { key: '承保量', name: '承保量', bg: '#ffffff', isPct: false },
+                { key: '工单创建量', name: '工单创建量', bg: '#ffffff', isPct: false },
+                { key: '建单率', name: '建单率', bg: '#fffaf0', isPct: true, high: 30, low: 15 },
+                { key: '退保订单量', name: '退保订单量', bg: '#ffffff', isPct: false },
+                { key: '进入退保挽单订单量', name: '进入退保挽单订单量', bg: '#ffffff', isPct: false },
+                { key: '入库率', name: '入库率', bg: '#f0fff4', isPct: true, high: 70, low: 50 },
+                { key: '保司退保未建单占比', name: '保司退保未建单', bg: '#fff5f5', isPct: true, high: 20, low: 3 },
+                { key: '微信投诉未建单占比', name: '微信投诉未建单', bg: '#fff5f5', isPct: true, high: 15, low: 2 },
+                { key: '用户高风险未建单占比', name: '用户风险未建单', bg: '#fff5f5', isPct: true, high: 8, low: 3 },
+                { key: '订单高风险未建单占比', name: '订单风险未建单', bg: '#fff5f5', isPct: true, high: 10, low: 1 },
+                { key: '客服操作未建单占比', name: '客服操作未建单', bg: '#fff5f5', isPct: true, high: 18, low: 10 },
+                { key: '退保咨询单量', name: '退保咨询单量', bg: '#ffffff', isPct: false },
+                { key: 't0拦截率', name: 'T0拦截率', bg: '#ebf8ff', isPct: true, high: 80, low: 60 },
+                { key: 't7拦截率', name: 'T7拦截率', bg: '#ebf8ff', isPct: true, high: 65, low: 45 },
+                { key: 't35续费率', name: 'T35续费率', bg: '#ebf8ff', isPct: true, high: 30, low: 5 }
+            ];
+
+            // 动态周顺序：从旧到新（日期从左到右变大）
+            const weekCount = weeks.length;
+            const weekOrder = Array.from({ length: weekCount }, (_, i) => i);
+            const weekHeaders = weeks;
+
+            let html = '<table class="data-table"><thead><tr>';
+            html += '<th style="position:sticky;left:0;background:#f7fafc;z-index:3;">渠道</th>';
+            html += '<th>指标</th>';
+            weekHeaders.forEach(w => html += `<th>${w}</th>`);
+            html += '<th>平均</th><th>较平均</th><th>较上周</th>';
+            html += '</tr></thead><tbody>';
+
+            channels.forEach(ch => {
+                const d = rawData[ch];
+
+                metrics.forEach((m, idx) => {
+                    html += '<tr>';
+                    if (idx === 0) {
+                        html += `<td rowspan="${metrics.length}" class="channel-cell" style="position:sticky;left:0;z-index:2;">${ch}</td>`;
+                    }
+                    html += `<td style="font-weight:600;background:${m.bg};">${m.name}</td>`;
+
+                    const data = d[m.key];
+                    // 按照周顺序（从旧到新）输出数据
+                    html += '<td style="background:' + m.bg + ';">' + weekOrder.map((i) => {
+                        const v = data[i];
+                        if (v === null || v === undefined) return '-';
+                        if (m.isPct) {
+                            const val = v.toFixed(1) + '%';
+                            // 判断异常高低
+                            if (m.high !== undefined && v >= m.high) return `<span class="pct-high">${val}</span>`;
+                            if (m.low !== undefined && v <= m.low) return `<span class="pct-low">${val}</span>`;
+                            return val;
+                        }
+                        return v;
+                    }).join('</td><td style="background:' + m.bg + ';">') + '</td>';
+
+                    // 计算平均和趋势
+                    const validData = data.filter(v => v !== null && v !== undefined);
+                    const avgVal = validData.length > 0 ? validData.reduce((a, b) => a + b, 0) / validData.length : null;
+                    const latestIdx = weekCount - 1;
+                    const prevIdx = weekCount - 2;
+                    const latestVal = data[latestIdx];
+                    const prevWeekVal = data[prevIdx];
+
+                    // 较平均趋势
+                    let avgChangeHtml = '-';
+                    if (avgVal !== null && latestVal !== null) {
+                        const avgCh = latestVal - avgVal;
+                        if (m.isPct) {
+                            avgChangeHtml = `<span class="${avgCh >= 0 ? 'status-up' : 'status-down'}">${avgCh >= 0 ? '+' : ''}${avgCh.toFixed(1)}pp</span>`;
+                        } else {
+                            avgChangeHtml = `<span class="${avgCh >= 0 ? 'status-up' : 'status-down'}">${avgCh >= 0 ? '+' : ''}${Math.round(avgCh)}</span>`;
+                        }
+                    }
+
+                    // 较上周趋势
+                    let weekChangeHtml = '-';
+                    if (prevWeekVal !== null && latestVal !== null) {
+                        const weekCh = latestVal - prevWeekVal;
+                        if (m.isPct) {
+                            weekChangeHtml = `<span class="${weekCh >= 0 ? 'status-up' : 'status-down'}">${weekCh >= 0 ? '+' : ''}${weekCh.toFixed(1)}pp</span>`;
+                        } else {
+                            weekChangeHtml = `<span class="${weekCh >= 0 ? 'status-up' : 'status-down'}">${weekCh >= 0 ? '+' : ''}${Math.round(weekCh)}</span>`;
+                        }
+                    }
+
+                    html += `<td style="font-weight:600;">${avgVal !== null ? (m.isPct ? avgVal.toFixed(1) + '%' : Math.round(avgVal)) : '-'}</td>`;
+                    html += `<td>${avgChangeHtml}</td>`;
+                    html += `<td>${weekChangeHtml}</td>`;
+                    html += '</tr>';
+                });
+
+                // 分隔行（colspan需要动态计算）
+                const colspan = 3 + weekCount + 3;
+                html += `<tr><td colspan="${colspan}" style="background:#e2e8f0;height:2px;padding:0;"></td></tr>`;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        window.addEventListener('load', init);
+        window.addEventListener('resize', () => {
+            if (trendChart) trendChart.resize();
+            if (compareChart) compareChart.resize();
+            if (reasonChart) reasonChart.resize();
+        });
+    </script>
+</body>
+</html>
